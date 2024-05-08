@@ -102,6 +102,9 @@ def eval_one_epoch(hint, tgan, sampler, src, dst, ts, label):
             # label_l_cut = label[s_idx:e_idx]
 
             size = len(src_l_cut)
+            if size == 0:
+                print('EMPTY!!!')
+                break
             src_l_fake, dst_l_fake = sampler.sample(size)
 
             pos_prob, neg_prob = tgan.contrast(src_l_cut, dst_l_cut, dst_l_fake, ts_l_cut, NUM_NEIGHBORS)
@@ -117,8 +120,8 @@ def eval_one_epoch(hint, tgan, sampler, src, dst, ts, label):
     return np.mean(val_acc), np.mean(val_ap), np.mean(val_f1), np.mean(val_auc)
 
 ### Load data and train val test split
-g_df = pd.read_csv('./processed/ml_{}.csv'.format(DATA))
-e_feat = np.load('./processed/ml_{}.npy'.format(DATA))
+g_df = pd.read_csv('./processed/fake3_ml_{}.csv'.format(DATA))
+e_feat = np.load('./processed/fake3_ml_{}.npy'.format(DATA))
 n_feat = np.load('./processed/ml_{}_node.npy'.format(DATA))
 
 # val_time, test_time = list(np.quantile(g_df.ts, [0.70, 0.85]))
@@ -303,12 +306,11 @@ for epoch in range(NUM_EPOCH):
 
 
 # testing phase use all information
-tgan.ngh_finder = full_ngh_finder
-test_acc, test_ap, test_f1, test_auc = eval_one_epoch('test for old nodes', tgan, test_rand_sampler, test_src_l, 
-test_dst_l, test_ts_l, test_label_l)
 
-nn_test_acc, nn_test_ap, nn_test_f1, nn_test_auc = eval_one_epoch('test for new nodes', tgan, nn_test_rand_sampler, nn_test_src_l, 
-nn_test_dst_l, nn_test_ts_l, nn_test_label_l)
+tgan.ngh_finder = full_ngh_finder
+test_acc, test_ap, test_f1, test_auc = eval_one_epoch('test for old nodes', tgan, test_rand_sampler, test_src_l, test_dst_l, test_ts_l, test_label_l)
+
+nn_test_acc, nn_test_ap, nn_test_f1, nn_test_auc = eval_one_epoch('test for new nodes', tgan, nn_test_rand_sampler, nn_test_src_l, nn_test_dst_l, nn_test_ts_l, nn_test_label_l)
 
 logger.info('Test statistics: Old nodes -- acc: {}, auc: {}, ap: {}'.format(test_acc, test_auc, test_ap))
 logger.info('Test statistics: New nodes -- acc: {}, auc: {}, ap: {}'.format(nn_test_acc, nn_test_auc, nn_test_ap))

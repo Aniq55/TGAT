@@ -446,7 +446,7 @@ class TGAN(torch.nn.Module):
         src_embed = self.tem_conv(src_idx_l, cut_time_l, self.num_layers, num_neighbors)
         target_embed = self.tem_conv(target_idx_l, cut_time_l, self.num_layers, num_neighbors)
         
- 
+
         score = self.affinity_score(src_embed, target_embed).squeeze(dim=-1)
         
         return score
