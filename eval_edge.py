@@ -52,6 +52,7 @@ split_times = {
 parser = argparse.ArgumentParser('Interface for TGAT experiments on link predictions')
 parser.add_argument('-d', '--data', type=str, help='data sources to use, try wikipedia or reddit', default='wikipedia')
 parser.add_argument('-x', '--distortion', type=str, help='distortion technique', default='')
+parser.add_argument('-y', '--distmodel', type=str, help='distortion model', default='')
 parser.add_argument('--bs', type=int, default=200, help='batch_size')
 parser.add_argument('--prefix', type=str, default='', help='prefix to name the checkpoints')
 parser.add_argument('--n_degree', type=int, default=20, help='number of neighbors to sample')
@@ -67,6 +68,7 @@ parser.add_argument('--agg_method', type=str, choices=['attn', 'lstm', 'mean'], 
 parser.add_argument('--attn_mode', type=str, choices=['prod', 'map'], default='prod', help='use dot product attention or mapping based')
 parser.add_argument('--time', type=str, choices=['time', 'pos', 'empty'], help='how to use time information', default='time')
 parser.add_argument('--uniform', action='store_true', help='take uniform sampling from temporal neighbors')
+
 
 try:
     args = parser.parse_args()
@@ -94,7 +96,6 @@ LEARNING_RATE = args.lr
 NODE_DIM = args.node_dim
 TIME_DIM = args.time_dim
 
-# breakpoint()
 
 MODEL_NAME = "TGAT"
 LOG_FILE_val = f"/home/chri6578/Documents/gttp/logs/evalcheck/{DATA}_val.log"
@@ -104,8 +105,10 @@ loguru1.add(LOG_FILE_val, level=INFO1_LEVEL, format="{message}", filter=lambda r
 loguru1.add(LOG_FILE_test, level=INFO2_LEVEL, format="{message}", filter=lambda record: record["level"].name == "INFO2")
 
 
-MODEL_SAVE_PATH = f'./saved_models/{args.prefix}-{args.agg_method}-{args.attn_mode}-{args.data}{args.distortion}.pth'
-get_checkpoint_path = lambda epoch: f'./saved_checkpoints/{args.prefix}-{args.agg_method}-{args.attn_mode}-{args.data}-{epoch}.pth'
+distortion_model = args.distmodel
+
+MODEL_SAVE_PATH = f'/home/chri6578/Documents/TGAT/saved_models/{args.prefix}-{args.agg_method}-{args.attn_mode}-{args.data}{distortion_model}.pth'
+get_checkpoint_path = lambda epoch: f'/home/chri6578/Documents/TGAT/saved_checkpoints/{args.prefix}-{args.agg_method}-{args.attn_mode}-{args.data}-{epoch}.pth'
 
 
 ### set up logger
@@ -125,6 +128,7 @@ logger.info(args)
 
 
 def eval_one_epoch(hint, tgan, sampler, src, dst, ts, label):
+    
     val_acc, val_ap, val_f1, val_auc = [], [], [], []
     with torch.no_grad():
         tgan = tgan.eval()
@@ -158,19 +162,10 @@ def eval_one_epoch(hint, tgan, sampler, src, dst, ts, label):
     return np.mean(val_acc), np.mean(val_ap), np.mean(val_f1), np.mean(val_auc)
 
 ### Load data and train val test split
-# g_df = pd.read_csv('./processed/ml_{}.csv'.format(DATA))
-# e_feat = np.load('./processed/ml_{}.npy'.format(DATA))
-# n_feat = np.load('./processed/ml_{}_node.npy'.format(DATA))
-
-# intense_{m}_ml_{dataset}_{sample}
-# DISTORTION = "intense_{m}_{sample}_" or ""
-
 g_df = pd.read_csv(f'/home/chri6578/Documents/gttp/data/{DATA}/{DISTORTION}ml_{DATA}.csv')
 e_feat = np.load(f'/home/chri6578/Documents/gttp/data/{DATA}/{DISTORTION}ml_{DATA}.npy')
 n_feat = np.load(f'/home/chri6578/Documents/gttp/data/{DATA}/ml_{DATA}_node.npy')
 
-# val_time, test_time = list(np.quantile(g_df.ts, [0.70, 0.85]))
-# val_time , test_time = 1862652.1, 2218288.6 # wikipedia
 val_time, test_time = split_times[DATA]
 
 src_l = g_df.u.values
@@ -266,8 +261,14 @@ device = torch.device('cuda:{}'.format(GPU))
 tgan = TGAN(train_ngh_finder, n_feat, e_feat,
             num_layers=NUM_LAYER, use_time=USE_TIME, agg_method=AGG_METHOD, attn_mode=ATTN_MODE,
             seq_len=SEQ_LEN, n_head=NUM_HEADS, drop_out=DROP_OUT, node_dim=NODE_DIM, time_dim=TIME_DIM)
-optimizer = torch.optim.Adam(tgan.parameters(), lr=LEARNING_RATE)
-criterion = torch.nn.BCELoss()
+# optimizer = torch.optim.Adam(tgan.parameters(), lr=LEARNING_RATE)
+# criterion = torch.nn.BCELoss()
+print(MODEL_SAVE_PATH)
+tgan.load_state_dict(torch.load(MODEL_SAVE_PATH))
+tgan.eval()
+print("=====================")
+print("=====================")
+
 tgan = tgan.to(device)
 
 num_instance = len(train_src_l)
@@ -278,81 +279,11 @@ logger.info('num of batches per epoch: {}'.format(num_batch))
 idx_list = np.arange(num_instance)
 np.random.shuffle(idx_list) 
 
-early_stopper = EarlyStopMonitor()
-for epoch in range(NUM_EPOCH):
-    # Training 
-    # training use only training graph
-    tgan.ngh_finder = train_ngh_finder
-    acc, ap, f1, auc, m_loss = [], [], [], [], []
-    np.random.shuffle(idx_list)
-    logger.info('start {} epoch'.format(epoch))
-    for k in range(num_batch):
-        # percent = 100 * k / num_batch
-        # if k % int(0.2 * num_batch) == 0:
-        #     logger.info('progress: {0:10.4f}'.format(percent))
-
-        s_idx = k * BATCH_SIZE
-        e_idx = min(num_instance - 1, s_idx + BATCH_SIZE)
-        src_l_cut, dst_l_cut = train_src_l[s_idx:e_idx], train_dst_l[s_idx:e_idx]
-        ts_l_cut = train_ts_l[s_idx:e_idx]
-        label_l_cut = train_label_l[s_idx:e_idx]
-        size = len(src_l_cut)
-        src_l_fake, dst_l_fake = train_rand_sampler.sample(size)
-        
-        with torch.no_grad():
-            pos_label = torch.ones(size, dtype=torch.float, device=device)
-            neg_label = torch.zeros(size, dtype=torch.float, device=device)
-        
-        optimizer.zero_grad()
-        tgan = tgan.train()
-        pos_prob, neg_prob = tgan.contrast(src_l_cut, dst_l_cut, dst_l_fake, ts_l_cut, NUM_NEIGHBORS)
-    
-        loss = criterion(pos_prob, pos_label)
-        loss += criterion(neg_prob, neg_label)
-        
-        loss.backward()
-        optimizer.step()
-        # get training results
-        with torch.no_grad():
-            tgan = tgan.eval()
-            pred_score = np.concatenate([(pos_prob).cpu().detach().numpy(), (neg_prob).cpu().detach().numpy()])
-            pred_label = pred_score > 0.5
-            true_label = np.concatenate([np.ones(size), np.zeros(size)])
-            acc.append((pred_label == true_label).mean())
-            ap.append(average_precision_score(true_label, pred_score))
-            # f1.append(f1_score(true_label, pred_label))
-            m_loss.append(loss.item())
-            auc.append(roc_auc_score(true_label, pred_score))
-
-    # validation phase use all information
-    tgan.ngh_finder = full_ngh_finder
-    val_acc, val_ap, val_f1, val_auc = eval_one_epoch('val for old nodes', tgan, val_rand_sampler, val_src_l, 
-    val_dst_l, val_ts_l, val_label_l)
-
-    nn_val_acc, nn_val_ap, nn_val_f1, nn_val_auc = eval_one_epoch('val for new nodes', tgan, val_rand_sampler, nn_val_src_l, 
-    nn_val_dst_l, nn_val_ts_l, nn_val_label_l)
-        
-    logger.info('epoch: {}:'.format(epoch))
-    logger.info('Epoch mean loss: {}'.format(np.mean(m_loss)))
-    logger.info('train acc: {}, val acc: {}, new node val acc: {}'.format(np.mean(acc), val_acc, nn_val_acc))
-    logger.info('train auc: {}, val auc: {}, new node val auc: {}'.format(np.mean(auc), val_auc, nn_val_auc))
-    logger.info('train ap: {}, val ap: {}, new node val ap: {}'.format(np.mean(ap), val_ap, nn_val_ap))
-    # logger.info('train f1: {}, val f1: {}, new node val f1: {}'.format(np.mean(f1), val_f1, nn_val_f1))
-
-    if early_stopper.early_stop_check(val_ap):
-        logger.info('No improvment over {} epochs, stop training'.format(early_stopper.max_round))
-        logger.info(f'Loading the best model at epoch {early_stopper.best_epoch}')
-        best_model_path = get_checkpoint_path(early_stopper.best_epoch)
-        tgan.load_state_dict(torch.load(best_model_path))
-        logger.info(f'Loaded the best model at epoch {early_stopper.best_epoch} for inference')
-        tgan.eval()
-        break
-    else:
-        torch.save(tgan.state_dict(), get_checkpoint_path(epoch))
-        
-        
+####### VALIDATION:
 # Record performance on val data for best model
 tgan.ngh_finder = full_ngh_finder
+
+
 val_acc, val_ap, val_f1, val_auc = eval_one_epoch('val for old nodes', tgan, val_rand_sampler, val_src_l, 
 val_dst_l, val_ts_l, val_label_l)
 
@@ -362,21 +293,15 @@ nn_val_dst_l, nn_val_ts_l, nn_val_label_l)
 logger.info('Val statistics: Old nodes -- acc: {}, auc: {}, ap: {}'.format(val_acc, val_auc, val_ap))
 logger.info('Val statistics: New nodes -- acc: {}, auc: {}, ap: {}'.format(nn_val_acc, nn_val_auc, nn_val_ap))
 
-if DISTORTION!='':
-    DISTORTION_A = DISTORTION.split('_')[0]
-    DISTORTION_B = DISTORTION.split('_')[-2]
-else:
-    DISTORTION_A, DISTORTION_B = '', ''
-
 # MODEL \t DISTORTION \t SAMPLE \t SPLIT \t TYPE \t ACC \t AUC \t AP \t EPOCH
-info1_message = [MODEL_NAME, DISTORTION_A, DISTORTION_B, "Val", "tdv", 
-                f"{val_acc:.4f}", f"{val_auc:.4f}", f"{val_ap:.4f}", f"{early_stopper.best_epoch}"]
+info1_message = [MODEL_NAME, DISTORTION.split('_')[0], DISTORTION.split('_')[-2], "Val", "tdv", 
+                f"{val_acc:.4f}", f"{val_auc:.4f}", f"{val_ap:.4f}", f"{0}"]
 loguru1.log("INFO1", '\t'.join(info1_message))
-info1_message = [MODEL_NAME, DISTORTION_A, DISTORTION_B, "Val", "idv", 
-                f"{nn_val_acc:.4f}", f"{nn_val_auc:.4f}", f"{nn_val_ap:.4f}", f"{early_stopper.best_epoch}"]
+info1_message = [MODEL_NAME, DISTORTION.split('_')[0], DISTORTION.split('_')[-2], "Val", "idv", 
+                f"{nn_val_acc:.4f}", f"{nn_val_auc:.4f}", f"{nn_val_ap:.4f}", f"{0}"]
 loguru1.log("INFO1", '\t'.join(info1_message))
 
-
+####### TESTING:
 
 # testing phase use all information
 tgan.ngh_finder = full_ngh_finder
@@ -390,17 +315,13 @@ logger.info('Test statistics: Old nodes -- acc: {}, auc: {}, ap: {}'.format(test
 logger.info('Test statistics: New nodes -- acc: {}, auc: {}, ap: {}'.format(nn_test_acc, nn_test_auc, nn_test_ap))
 
 # MODEL \t DISTORTION \t SAMPLE \t SPLIT \t TYPE \t ACC \t AUC \t AP
-info2_message = [MODEL_NAME, DISTORTION_A, DISTORTION_B, "Test", "tdv",
+info2_message = [MODEL_NAME, DISTORTION.split('_')[0], DISTORTION.split('_')[-2], "Test", "tdv",
                 f"{test_acc:.4f}", f"{test_auc:.4f}", f"{test_ap:.4f}"]
 loguru1.log("INFO2", '\t'.join(info2_message))
-info2_message = [MODEL_NAME, DISTORTION_A, DISTORTION_B, "Test", "idv",
+info2_message = [MODEL_NAME, DISTORTION.split('_')[0], DISTORTION.split('_')[-2], "Test", "idv",
                 f"{nn_test_acc:.4f}", f"{nn_test_auc:.4f}", f"{nn_test_ap:.4f}"]
 loguru1.log("INFO2", '\t'.join(info2_message))
 
-
-logger.info('Saving TGAN model')
-torch.save(tgan.state_dict(), MODEL_SAVE_PATH)
-logger.info('TGAN models saved')
 
 
 

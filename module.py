@@ -57,8 +57,15 @@ class MultiHeadAttention(nn.Module):
         self.n_head = n_head
         self.d_k = d_k
         self.d_v = d_v
-
+        
+        # breakpoint()
+        # self.d_k = 174
+        # self.d_v = 174
+        
+        # check dimensions here
         self.w_qs = nn.Linear(d_model, n_head * d_k, bias=False)
+        
+        # d_model2 = d_model
         self.w_ks = nn.Linear(d_model, n_head * d_k, bias=False)
         self.w_vs = nn.Linear(d_model, n_head * d_v, bias=False)
         nn.init.normal_(self.w_qs.weight, mean=0, std=np.sqrt(2.0 / (d_model + d_k)))
@@ -83,8 +90,8 @@ class MultiHeadAttention(nn.Module):
         sz_b, len_k, _ = k.size()
         sz_b, len_v, _ = v.size()
 
+        # breakpoint()
         residual = q
-
         q = self.w_qs(q).view(sz_b, len_q, n_head, d_k)
         k = self.w_ks(k).view(sz_b, len_k, n_head, d_k)
         v = self.w_vs(v).view(sz_b, len_v, n_head, d_v)
@@ -314,8 +321,9 @@ class AttnModel(torch.nn.Module):
         
         self.feat_dim = feat_dim
         self.time_dim = time_dim
-        
+        # breakpoint()
         self.edge_in_dim = (feat_dim + edge_dim + time_dim)
+        
         self.model_dim = self.edge_in_dim
         #self.edge_fc = torch.nn.Linear(self.edge_in_dim, self.feat_dim, bias=False)
 
@@ -395,6 +403,8 @@ class TGAN(torch.nn.Module):
         self.edge_raw_embed = torch.nn.Embedding.from_pretrained(self.e_feat_th, padding_idx=0, freeze=True)
         self.node_raw_embed = torch.nn.Embedding.from_pretrained(self.n_feat_th, padding_idx=0, freeze=True)
         
+        # breakpoint()
+        
         self.feat_dim = self.n_feat_th.shape[1]
         
         self.n_feat_dim = self.feat_dim
@@ -415,12 +425,12 @@ class TGAN(torch.nn.Module):
         elif agg_method == 'lstm':
             self.logger.info('Aggregation uses LSTM model')
             self.attn_model_list = torch.nn.ModuleList([LSTMPool(self.feat_dim,
-                                                                 self.feat_dim,
-                                                                 self.feat_dim) for _ in range(num_layers)])
+                                                                self.feat_dim,
+                                                                self.feat_dim) for _ in range(num_layers)])
         elif agg_method == 'mean':
             self.logger.info('Aggregation uses constant mean model')
             self.attn_model_list = torch.nn.ModuleList([MeanPool(self.feat_dim,
-                                                                 self.feat_dim) for _ in range(num_layers)])
+                                                                self.feat_dim) for _ in range(num_layers)])
         else:
         
             raise ValueError('invalid agg_method value, use attn or lstm')
@@ -465,7 +475,6 @@ class TGAN(torch.nn.Module):
         device = self.n_feat_th.device
     
         batch_size = len(src_idx_l)
-        
         src_node_batch_th = torch.from_numpy(src_idx_l).long().to(device)
         cut_time_l_th = torch.from_numpy(cut_time_l).float().to(device)
         
